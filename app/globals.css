@@ -1,26 +1,123 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* 全局字体 & 颜色 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* 去掉默认 margin */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Notra Chat 主布局 */
+.notra-root {
+  @apply min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-slate-900;
+}
+
+.notra-shell {
+  @apply mx-auto flex min-h-screen max-w-5xl flex-col px-4 pb-6 pt-8 sm:px-6 lg:px-8;
+}
+
+.notra-header {
+  @apply mb-4 flex items-center justify-between gap-3 sm:mb-6;
+}
+
+.notra-title {
+  @apply flex items-center gap-2 text-lg font-semibold text-slate-900 sm:text-xl;
+}
+
+.notra-subtitle {
+  @apply text-xs text-slate-500 sm:text-sm;
+}
+
+/* 聊天容器 */
+.notra-chat {
+  @apply flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-sm backdrop-blur;
+  @apply flex flex-col;
+}
+
+.notra-chat-scroll {
+  @apply flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5;
+}
+
+/* 气泡 */
+.notra-msg-row {
+  @apply flex w-full;
+}
+
+.notra-msg-row-user {
+  @apply justify-end;
+}
+
+.notra-msg-row-assistant {
+  @apply justify-start;
+}
+
+.notra-avatar {
+  @apply mr-3 flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 text-xs font-semibold text-white shadow-sm;
+}
+
+.notra-avatar-user {
+  @apply bg-slate-800;
+}
+
+.notra-bubble {
+  @apply inline-block max-w-full rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm;
+}
+
+.notra-bubble-user {
+  @apply rounded-br-sm bg-brand-600 text-white;
+}
+
+.notra-bubble-assistant {
+  @apply rounded-bl-sm bg-slate-100 text-slate-900;
+}
+
+/* Markdown 内容美化 */
+.notra-markdown {
+  @apply prose prose-slate max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-pre:bg-slate-900 prose-pre:text-slate-50 prose-code:text-[13px] prose-code:font-normal;
+}
+
+/* 输入区 */
+.notra-input-bar {
+  @apply border-t border-slate-200 bg-slate-50/80 px-3 py-3 sm:px-4 sm:py-3;
+}
+
+.notra-input-inner {
+  @apply flex items-end gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500;
+}
+
+.notra-input {
+  @apply max-h-40 flex-1 resize-none border-none bg-transparent text-sm outline-none placeholder:text-slate-400;
+}
+
+.notra-send-btn {
+  @apply inline-flex shrink-0 items-center justify-center rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition;
+}
+
+.notra-send-btn:hover {
+  @apply bg-brand-700;
+}
+
+.notra-send-btn:disabled {
+  @apply cursor-not-allowed bg-slate-300 text-slate-500 shadow-none;
+}
+
+/* 底部文案 */
+.notra-footer {
+  @apply mt-2 text-center text-[11px] text-slate-400;
 }

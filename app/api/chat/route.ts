@@ -1,29 +1,36 @@
 // app/api/chat/route.ts
+import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const client = new OpenAI({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  // 如果你有自定义 baseUrl 再加：
-  // baseURL: process.env.OPENAI_BASE_URL,
 });
 
-export const runtime = "edge";
+export const runtime = "edge"; // 流式输出更顺滑
 
 export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
 
     if (!process.env.OPENAI_API_KEY) {
-      return new Response(
-        "Missing OPENAI_API_KEY. Please set it in .env.local",
+      return NextResponse.json(
+        { error: "Missing OPENAI_API_KEY on server" },
         { status: 500 }
       );
     }
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o",          // 你说用 ChatGPT 4o
+    if (!messages || !Array.isArray(messages)) {
+      return NextResponse.json(
+        { error: "Invalid request body: messages is required" },
+        { status: 400 }
+      );
+    }
+
+    // 这里用的是 GPT-4o 流式输出
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // 你也可以改成 "gpt-4o"
+      messages,
       stream: true,
-      messages,                 // [{role, content}... 前端传过来的完整对话历史
     });
 
     const encoder = new TextEncoder();
@@ -32,7 +39,7 @@ export async function POST(req: Request) {
       async start(controller) {
         try {
           for await (const chunk of completion) {
-            const delta = chunk.choices[0]?.delta?.content || "";
+            const delta = chunk.choices[0]?.delta?.content;
             if (delta) {
               controller.enqueue(encoder.encode(delta));
             }
@@ -52,8 +59,11 @@ export async function POST(req: Request) {
         "Cache-Control": "no-cache",
       },
     });
-  } catch (e) {
-    console.error("API /api/chat error:", e);
-    return new Response("Internal Server Error", { status: 500 });
+  } catch (error) {
+    console.error("API /api/chat error:", error);
+    return NextResponse.json(
+      { error: "Server error while calling OpenAI" },
+      { status: 500 }
+    );
   }
 }

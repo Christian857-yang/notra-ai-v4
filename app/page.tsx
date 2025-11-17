@@ -1,193 +1,261 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { FormEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type ChatMessage = {
-  role: "user" | "assistant";
+type Role = "user" | "assistant";
+
+interface ChatMessage {
+  role: Role;
   content: string;
+}
+
+/**
+ * 根据助手回复内容，挑一个合适的 emoji
+ */
+function getAssistantEmoji(content: string, index: number): string {
+  // 第一条欢迎语，只要一个 👋
+  if (index === 0) return "👋";
+
+  const text = content.toLowerCase();
+
+  if (text.includes("summary") || text.includes("summarize") || text.includes("总结")) {
+    return "📝";
+  }
+  if (text.includes("plan") || text.includes("outline") || text.includes("大纲") || text.includes("规划")) {
+    return "📋";
+  }
+  if (text.includes("idea") || text.includes("brainstorm") || text.includes("想法") || text.includes("creative")) {
+    return "💡";
+  }
+  if (text.includes("example") || text.includes("案例") || text.includes("例子")) {
+    return "📚";
+  }
+  if (text.includes("steps") || text.includes("步骤") || text.includes("how to")) {
+    return "🪜";
+  }
+
+  return "💬";
+}
+
+const INITIAL_ASSISTANT_MESSAGE: ChatMessage = {
+  role: "assistant",
+  // 注意：这里不带任何 emoji，由 getAssistantEmoji 统一加 👋
+  content:
+    "Hi, I'm Notra — your intelligent learning & writing companion. What would you like to work on today?",
 };
 
 export default function NotraChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      content: "你好，我是 Notra，你的智能学习助手。今天想一起解决什么问题？",
-    },
+    INITIAL_ASSISTANT_MESSAGE,
   ]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  // 聊天滚动到底部
+  // 每次消息变化时，滚动到底部
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isSending) return;
 
-    const userMessage: ChatMessage = { role: "user", content: input.trim() };
+    const userMessage: ChatMessage = { role: "user", content: trimmed };
+    const nextMessages = [...messages, userMessage];
 
-    // 先把用户消息推进去
-    setMessages((prev) => [...prev, userMessage]);
+    // 先更新界面，再发请求
+    setMessages(nextMessages);
     setInput("");
-    setLoading(true);
-
-    // 占位一条空的助手消息，后面流式往里写
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+    setIsSending(true);
 
     try {
-      const response = await fetch("/api/notra", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, userMessage].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
+        body: JSON.stringify({ messages: nextMessages }),
       });
 
-      if (!response.ok) {
+      if (!res.ok || !res.body) {
         throw new Error("Request failed");
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      // 先插入一个空的 assistant 消息，用来实时填充
+      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
+      const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
-      let assistantText = "";
+      let done = false;
+      let fullText = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: !done });
+          fullText += chunk;
 
-        const chunk = decoder.decode(value, { stream: true });
-        if (!chunk) continue;
-
-        assistantText += chunk;
-
-        // 每次收到新内容，更新最后一条 assistant 消息，实现“打字机”效果
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: assistantText,
-          };
-          return updated;
-        });
+          // 实时更新“最后一条”助手消息
+          setMessages((prev) => {
+            const updated = [...prev];
+            const lastIndex = updated.length - 1;
+            if (lastIndex >= 0 && updated[lastIndex].role === "assistant") {
+              updated[lastIndex] = {
+                ...updated[lastIndex],
+                content: fullText,
+              };
+            }
+            return updated;
+          });
+        }
       }
     } catch (error) {
+      console.error(error);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           content:
-            "⚠️ 网络或服务异常，请稍后重试。如果问题持续出现，可以检查服务器和 API Key 配置。",
+            "⚠️ Something went wrong. Please check your network or API key and try again.",
         },
       ]);
     } finally {
-      setLoading(false);
+      setIsSending(false);
     }
-  };
+  }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
-      {/* 顶部栏 */}
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white text-lg">
-              N
+    <main className="flex min-h-screen flex-col bg-gradient-to-b from-sky-50 via-blue-50 to-indigo-100 text-slate-900">
+      {/* 顶部导航 / 品牌区 */}
+      <header className="border-b border-white/60 bg-white/80 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            {/* 左上角 Logo 图标 */}
+            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 via-indigo-500 to-cyan-400 shadow-md">
+              <span className="text-sm font-semibold text-white">N</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-slate-900">
-                Notra AI
+                Notra
               </span>
               <span className="text-xs text-slate-500">
-                专注学习与写作的智能助手
+                Your Intelligent Learning &amp; Writing Companion
               </span>
             </div>
           </div>
-          <span className="text-[11px] text-slate-400">
-            © {new Date().getFullYear()} Notra
-          </span>
+
+          <div className="hidden text-xs text-slate-400 sm:block">
+            © 2025 Notra
+          </div>
         </div>
       </header>
 
-      {/* 聊天内容 */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex h-full max-w-4xl flex-col px-3 py-4 sm:px-6 sm:py-6">
-          <div className="flex-1 space-y-4">
-            {messages.map((msg, idx) => {
-              const isUser = msg.role === "user";
-              return (
-                <div
-                  key={idx}
-                  className={`flex ${
-                    isUser ? "justify-end" : "justify-start"
-                  }`}
-                >
+      {/* 中间：消息区 + 底部输入区（输入区固定在底部） */}
+      <div className="flex flex-1 flex-col">
+        {/* 消息滚动区，占据除底部输入框以外的所有空间 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-5xl flex-col px-4 py-4 sm:px-6 sm:py-6">
+            <div className="space-y-4">
+              {messages.map((msg, index) => {
+                const isUser = msg.role === "user";
+                const isAssistant = msg.role === "assistant";
+                const emoji = isAssistant
+                  ? getAssistantEmoji(msg.content, index)
+                  : "";
+
+                return (
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                      isUser
-                        ? "bg-blue-600 text-white"
-                        : "bg-white text-slate-900 border border-slate-100"
+                    key={index}
+                    className={`w-full flex ${
+                      isUser ? "justify-end" : "justify-start"
                     }`}
                   >
-                    {isUser ? (
-                      msg.content
-                    ) : (
-                      <div className="prose prose-slate prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content ||
-                            (idx === messages.length - 1 && loading
-                              ? "Notra 正在思考…"
-                              : "")}
-                        </ReactMarkdown>
-                      </div>
-                    )}
+                    <div
+                      className={`relative max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                        isUser
+                          ? "bg-blue-600 text-white"
+                          : "bg-white/90 text-slate-900 border border-white/70"
+                      }`}
+                    >
+                      {isAssistant ? (
+                        <div className="flex items-start gap-2">
+                          {/* 每条助手消息左侧的 emoji */}
+                          <span className="mt-[2px] select-none">
+                            {emoji}
+                          </span>
+                          {/* Markdown 内容 */}
+                          <div className="prose prose-slate prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      ) : (
+                        // 用户消息就不加 emoji，保持干净的蓝色气泡
+                        <div className="whitespace-pre-wrap leading-relaxed">
+                          {msg.content}
+                        </div>
+                      )}
+
+                      {/* Copy 按钮（只给助手消息） */}
+                      {isAssistant && msg.content && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigator.clipboard.writeText(msg.content)
+                          }
+                          className="mt-2 text-xs text-blue-500 hover:text-blue-600 hover:underline"
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
+                );
+              })}
 
-          {/* 底部小提示 */}
-          <div className="mt-4 text-[11px] text-slate-400">
-            <span>⌨︎ 回车发送 · Shift + 回车换行 · Notra 不会引用任何 GPT 品牌，只代表我们自己的产品。</span>
+              <div ref={bottomRef} />
+            </div>
           </div>
         </div>
-      </main>
 
-      {/* 底部输入区 */}
-      <footer className="border-t bg-white">
-        <div className="mx-auto flex max-w-4xl items-end gap-3 px-3 py-3 sm:px-6 sm:py-4">
-          <textarea
-            className="max-h-32 min-h-[46px] flex-1 resize-none rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none ring-0 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
-            placeholder="输入你的问题，比如：『帮我梳理 UCL 的专业与申请要求』，回车发送，Shift+回车换行…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={loading}
-            className="mb-[2px] inline-flex h-[46px] items-center rounded-2xl bg-blue-600 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            {loading ? "思考中…" : "发送"}
-          </button>
+        {/* 底部输入栏：始终贴在页面最底部 */}
+        <div className="border-t border-white/60 bg-white/80 backdrop-blur-sm">
+          <div className="mx-auto max-w-5xl px-4 py-3 sm:px-6">
+            {/* 提示语 */}
+            <p className="mb-2 text-center text-[11px] text-slate-400">
+              Notra 不会存储你的私人对话，请放心使用。
+            </p>
+
+            <form
+              onSubmit={handleSubmit}
+              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-2 shadow-sm"
+            >
+              <input
+                className="flex-1 border-none bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                placeholder="Ask Notra anything about your learning, essays, or ideas..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={isSending}
+              />
+              <button
+                type="submit"
+                disabled={isSending || !input.trim()}
+                className={`rounded-full px-4 py-1.5 text-xs font-medium text-white shadow-sm transition ${
+                  isSending || !input.trim()
+                    ? "bg-slate-300 cursor-not-allowed"
+                    : "bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600"
+                }`}
+              >
+                {isSending ? "Thinking..." : "Send"}
+              </button>
+            </form>
+          </div>
         </div>
-      </footer>
-    </div>
+      </div>
+    </main>
   );
 }

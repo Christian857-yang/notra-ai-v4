@@ -2,15 +2,22 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-export const runtime = "edge"; // 流式输出
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   try {
-    const { messages, model = "gpt-4o-mini" } = await req.json();
+    const { messages, model } = await req.json();
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
-        { error: "Invalid request body: messages is required" },
+        { error: "Invalid request: messages is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!model) {
+      return NextResponse.json(
+        { error: "Model is required" },
         { status: 400 }
       );
     }
@@ -26,9 +33,9 @@ export async function POST(req: Request) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // 调用 OpenAI 流式输出
+    // ⭐ 后端直接用前端传来的模型名称
     const completion = await openai.chat.completions.create({
-      model,           // ← 支持 gpt-4o-mini / gpt-4o / gpt-5.1
+      model: model,
       messages,
       stream: true,
     });
@@ -43,7 +50,6 @@ export async function POST(req: Request) {
             if (delta) controller.enqueue(encoder.encode(delta));
           }
         } catch (err) {
-          console.error("Stream error:", err);
           controller.error(err);
         } finally {
           controller.close();
@@ -53,15 +59,13 @@ export async function POST(req: Request) {
 
     return new Response(stream, {
       headers: {
-        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Type": "text/plain; charset=UTF-8",
         "Cache-Control": "no-cache",
       },
     });
   } catch (error) {
-    console.error("API /api/chat error:", error);
-
     return NextResponse.json(
-      { error: "Server error calling OpenAI" },
+      { error: "Server error", detail: error },
       { status: 500 }
     );
   }

@@ -1,210 +1,149 @@
 "use client";
 
-import React, { FormEvent, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useState, useRef } from "react";
 
-type Role = "user" | "assistant";
-
-interface ChatMessage {
-  role: Role;
-  content: string;
-}
-
-const INITIAL_ASSISTANT_MESSAGE: ChatMessage = {
-  role: "assistant",
-  content:
-    "Hi, I'm Notra — your intelligent learning & writing companion. What would you like to work on today?",
-};
-
-export default function NotraChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    INITIAL_ASSISTANT_MESSAGE,
-  ]);
-
+export default function Home() {
+  const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
+  const [model, setModel] = useState("gpt-4o-mini");
+  const [loading, setLoading] = useState(false);
 
-  // ⭐ 新增：模型切换
-  const [model, setModel] = useState<"gpt-4o-mini" | "gpt-4o" | "gpt-5.1">(
-    "gpt-4o-mini"
-  );
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const sendMessage = async () => {
+    if (!input.trim()) return;
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const newMessages = [
+      ...messages,
+      { role: "user", content: input }
+    ];
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isSending) return;
-
-    const userMessage: ChatMessage = { role: "user", content: trimmed };
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
+    setMessages(newMessages);
     setInput("");
-    setIsSending(true);
+    setLoading(true);
 
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: nextMessages,
-          model, // ⭐ 发送选择的模型
-        }),
-      });
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: newMessages,
+        model: model,
+      }),
+    });
 
-      if (!res.ok || !res.body) throw new Error("Request failed");
-
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let fullText = "";
-      let done = false;
-
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-        if (value) {
-          const chunk = decoder.decode(value);
-          fullText += chunk;
-
-          setMessages((prev) => {
-            const updated = [...prev];
-            const i = updated.length - 1;
-            if (updated[i].role === "assistant") {
-              updated[i] = { role: "assistant", content: fullText };
-            }
-            return updated;
-          });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "⚠️ Something went wrong. Please check your network or API key and try again.",
-        },
+    if (!res.ok) {
+      setMessages([
+        ...newMessages,
+        { role: "assistant", content: "⚠️ Something went wrong. Please check your API key." }
       ]);
-    } finally {
-      setIsSending(false);
+      setLoading(false);
+      return;
     }
-  }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+
+    let assistantReply = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      assistantReply += decoder.decode(value);
+      setMessages([
+        ...newMessages,
+        { role: "assistant", content: assistantReply }
+      ]);
+    }
+
+    setLoading(false);
+  };
 
   return (
-    <main className="flex min-h-screen flex-col bg-gradient-to-b from-sky-50 via-blue-50 to-indigo-100 text-slate-900">
-      {/* 顶部栏 */}
-      <header className="border-b border-white/60 bg-white/80 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+    <div className="notra-root">
+      <div className="notra-shell">
 
-          {/* 左侧品牌 */}
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 via-indigo-500 to-cyan-400 shadow-md">
-              <span className="text-sm font-semibold text-white">N</span>
-            </div>
-            <div>
-              <span className="text-sm font-semibold">Notra</span>
-            </div>
-          </div>
+        {/* 顶部标题栏 */}
+        <div className="notra-header">
+          <div className="notra-title">Notra — Learning Companion</div>
 
-          {/* ⭐ 新增：模型切换 */}
-          <div className="flex gap-2 text-xs">
+          {/* ⭐ 三模型选择按钮 */}
+          <div className="flex gap-2">
             <button
-              onClick={() => setModel("gpt-4o-mini")}
-              className={`px-3 py-1 rounded-full border ${
-                model === "gpt-4o-mini"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-600"
+              className={`px-3 py-1.5 rounded-lg text-xs shadow-sm ${
+                model === "gpt-4o-mini" ? "bg-blue-600 text-white" : "bg-slate-200"
               }`}
+              onClick={() => setModel("gpt-4o-mini")}
             >
               GPT-4o-mini
             </button>
 
             <button
-              onClick={() => setModel("gpt-4o")}
-              className={`px-3 py-1 rounded-full border ${
-                model === "gpt-4o"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-600"
+              className={`px-3 py-1.5 rounded-lg text-xs shadow-sm ${
+                model === "gpt-4o" ? "bg-blue-600 text-white" : "bg-slate-200"
               }`}
+              onClick={() => setModel("gpt-4o")}
             >
               GPT-4o
             </button>
 
             <button
-              onClick={() => setModel("gpt-5.1")}
-              className={`px-3 py-1 rounded-full border ${
-                model === "gpt-5.1"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-600"
+              className={`px-3 py-1.5 rounded-lg text-xs shadow-sm ${
+                model === "gpt-5.1" ? "bg-blue-600 text-white" : "bg-slate-200"
               }`}
+              onClick={() => setModel("gpt-5.1")}
             >
               GPT-5.1
             </button>
           </div>
         </div>
-      </header>
 
-      {/* 消息区 */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-4 py-4 space-y-4">
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`flex ${
-                msg.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
+        {/* 聊天窗口 */}
+        <div className="notra-chat">
+          <div className="notra-chat-scroll">
+
+            {messages.map((msg, i) => (
               <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-white/90 text-slate-900 border"
+                key={i}
+                className={`notra-msg-row ${
+                  msg.role === "user" ? "notra-msg-row-user" : "notra-msg-row-assistant"
                 }`}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <div
+                  className={`notra-bubble ${
+                    msg.role === "user" ? "notra-bubble-user" : "notra-bubble-assistant"
+                  }`}
+                >
                   {msg.content}
-                </ReactMarkdown>
+                </div>
               </div>
+            ))}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* 输入框 */}
+          <div className="notra-input-bar">
+            <div className="notra-input-inner">
+              <textarea
+                className="notra-input"
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask Notra anything..."
+              />
+              <button
+                className="notra-send-btn"
+                disabled={loading}
+                onClick={sendMessage}
+              >
+                Send
+              </button>
             </div>
-          ))}
+          </div>
 
-          <div ref={bottomRef} />
         </div>
       </div>
-
-      {/* 输入 */}
-      <div className="border-t bg-white/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-5xl px-4 py-3">
-          <form
-            onSubmit={handleSubmit}
-            className="flex items-center gap-2 px-3 py-2 border rounded-full bg-white"
-          >
-            <input
-              className="flex-1 bg-transparent text-sm outline-none"
-              placeholder="Ask Notra anything..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-            />
-
-            <button
-              type="submit"
-              disabled={isSending || !input.trim()}
-              className="px-4 py-1.5 rounded-full bg-blue-600 text-white text-xs"
-            >
-              {isSending ? "Thinking..." : "Send"}
-            </button>
-          </form>
-        </div>
-      </div>
-    </main>
+    </div>
   );
 }
+
+  

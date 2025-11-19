@@ -54,6 +54,9 @@ export default function NotraChatPage() {
   const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  // 新增：模型提供方切换（OpenAI / Gemini）
+  const [provider, setProvider] = useState<"openai" | "gemini">("openai");
+
   // 每次消息变化时，滚动到底部
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -76,7 +79,10 @@ export default function NotraChatPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          provider, // ✅ 把当前选择的模型一起传给后端
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -147,8 +153,38 @@ export default function NotraChatPage() {
             </div>
           </div>
 
-          <div className="hidden text-xs text-slate-400 sm:block">
-            © 2025 Notra
+          {/* 右侧：版权 + 模型切换 */}
+          <div className="flex items-center gap-3">
+            <div className="hidden text-xs text-slate-400 sm:block">
+              © 2025 Notra
+            </div>
+
+            {/* 模型切换按钮 */}
+            <div className="flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setProvider("openai")}
+                className={`text-xs px-2 py-0.5 rounded-full ${
+                  provider === "openai"
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-600 hover:text-slate-800"
+                }`}
+              >
+                GPT-4o
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider("gemini")}
+                className={`text-xs px-2 py-0.5 rounded-full ${
+                  provider === "gemini"
+                    ? "bg-indigo-600 text-white"
+                    : "text-slate-600 hover:text-slate-800"
+                }`}
+              >
+                Gemini 3.0
+              </button>
+            </div>
           </div>
         </div>
       </header>

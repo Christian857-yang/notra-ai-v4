@@ -2,11 +2,25 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-export const runtime = "edge"; // 保留流式输出
+export const runtime = "edge"; // 为了流式输出更顺滑
+
+type Provider = "openai" | "openai-5" | "gemini";
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
+
+// 可以在 Vercel 日志里看到这些 warn，方便排查
+if (!OPENAI_API_KEY) {
+  console.warn("[Notra] OPENAI_API_KEY is not set.");
+}
+if (!GOOGLE_AI_API_KEY) {
+  console.warn("[Notra] GOOGLE_AI_API_KEY is not set.");
+}
 
 export async function POST(req: Request) {
   try {
-    const { messages, provider = "openai-4o" } = await req.json();
+    const body = await req.json();
+    const { messages, provider = "openai" }: { messages: any[]; provider?: Provider } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
@@ -16,20 +30,25 @@ export async function POST(req: Request) {
     }
 
     // ------------------------------------------------
-    // 1️⃣ OpenAI GPT-4o（默认模型）
+    // 1️⃣ OpenAI 分支（GPT-4o / GPT-5.1(gpt-4.1)）
     // ------------------------------------------------
-    if (provider === "openai-4o") {
-      if (!process.env.OPENAI_API_KEY) {
+    if (provider === "openai" || provider === "openai-5") {
+      if (!OPENAI_API_KEY) {
         return NextResponse.json(
-          { error: "Missing OPENAI_API_KEY" },
+          { error: "Missing OPENAI_API_KEY on server" },
           { status: 500 }
         );
       }
 
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const openai = new OpenAI({
+        apiKey: OPENAI_API_KEY,
+      });
 
-      const completion = await client.chat.completions.create({
-        model: "gpt-4o",
+      // openai -> gpt-4o, openai-5 -> gpt-4.1
+      const model = provider === "openai" ? "gpt-4o" : "gpt-4.1";
+
+      const completion = await openai.chat.completions.create({
+        model,
         messages,
         stream: true,
       });
@@ -41,9 +60,12 @@ export async function POST(req: Request) {
           try {
             for await (const chunk of completion) {
               const delta = chunk.choices[0]?.delta?.content;
-              if (delta) controller.enqueue(encoder.encode(delta));
+              if (delta) {
+                controller.enqueue(encoder.encode(delta));
+              }
             }
           } catch (err) {
+            console.error("OpenAI stream error:", err);
             controller.error(err);
           } finally {
             controller.close();
@@ -60,101 +82,63 @@ export async function POST(req: Request) {
     }
 
     // ------------------------------------------------
-    // 2️⃣ OpenAI GPT-4.1（ChatGPT 5.1）
-    // ------------------------------------------------
-    if (provider === "openai-5.1") {
-      if (!process.env.OPENAI_API_KEY) {
-        return NextResponse.json(
-          { error: "Missing OPENAI_API_KEY" },
-          { status: 500 }
-        );
-      }
-
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-      const completion = await client.chat.completions.create({
-        model: "gpt-4.1", // OpenAI 的 naming 就是这个
-        messages,
-        stream: true,
-      });
-
-      const encoder = new TextEncoder();
-
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            for await (const chunk of completion) {
-              const delta = chunk.choices[0]?.delta?.content;
-              if (delta) controller.enqueue(encoder.encode(delta));
-            }
-          } catch (err) {
-            controller.error(err);
-          } finally {
-            controller.close();
-          }
-        },
-      });
-
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-cache",
-        },
-      });
-    }
-
-    // ------------------------------------------------
-    // 3️⃣ Gemini 3.0 Thinking（高智商模式）
+    // 2️⃣ Gemini 3.0 分支（gemini-3-pro-preview + thinkingLevel=high）
     // ------------------------------------------------
     if (provider === "gemini") {
-      if (!process.env.GOOGLE_AI_API_KEY) {
+      if (!GOOGLE_AI_API_KEY) {
         return NextResponse.json(
-          { error: "Missing GOOGLE_AI_API_KEY" },
+          { error: "Missing GOOGLE_AI_API_KEY on server" },
           { status: 500 }
         );
       }
 
-      const apiKey = process.env.GOOGLE_AI_API_KEY;
-
-      // 把 messages 拼成一个纯文本 prompt
+      // 把对话拼成一个长 prompt，保持和之前 messages 结构兼容
       const prompt = messages
         .map((m: any) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
         .join("\n");
 
-      const response = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-pro:generateContent",
+      const geminiRes = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
+            "x-goog-api-key": GOOGLE_AI_API_KEY,
           },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
+            contents: [
+              {
+                parts: [{ text: prompt }],
+              },
+            ],
             generationConfig: {
-              thinkingConfig: { thinkingLevel: "high" },
+              thinkingConfig: {
+                thinkingLevel: "high",
+              },
             },
           }),
         }
       );
 
-      if (!response.ok) {
-        const detail = await response.text();
+      if (!geminiRes.ok) {
+        const errorText = await geminiRes.text();
+        console.error("Gemini API error:", errorText);
         return NextResponse.json(
-          { error: "Gemini API error", detail },
+          { error: "Gemini API error", detail: errorText },
           { status: 500 }
         );
       }
 
-      const data = await response.json();
+      const data = await geminiRes.json();
 
       const text =
         data.candidates?.[0]?.content?.parts
           ?.map((p: any) => p.text || "")
-          .join("") || "Gemini 返回了空内容。";
+          .join("") || "Gemini 没有返回任何内容。";
 
       const encoder = new TextEncoder();
 
+      // 这里为了稳定，用“一次性整体推送”的方式给前端
       const stream = new ReadableStream({
         start(controller) {
           controller.enqueue(encoder.encode(text));
@@ -171,16 +155,16 @@ export async function POST(req: Request) {
     }
 
     // ------------------------------------------------
-    // 4️⃣ 未知 provider
+    // 3️⃣ 未知 provider
     // ------------------------------------------------
     return NextResponse.json(
       { error: `Unknown provider: ${provider}` },
       { status: 400 }
     );
   } catch (error) {
-    console.error("API error:", error);
+    console.error("API /api/chat error:", error);
     return NextResponse.json(
-      { error: "Server error" },
+      { error: "Server error while calling AI provider" },
       { status: 500 }
     );
   }
